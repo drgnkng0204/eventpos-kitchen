@@ -40,7 +40,7 @@ td.n,th.n{text-align:right}
 <main id="app"></main>
 <script type="module" src="store.js"></script>
 <script>
-let S=null, lastStatus={}, notifyRole=localStorage.notifyRole||'off', swReg=null, view=localStorage.view||'reg', cart={}, pay={recv:'',don:'',name:'',anon:false,note:''}, seenReq=new Set(), first=true;
+let S=null, tix=0, lastStatus={}, notifyRole=localStorage.notifyRole||'off', swReg=null, view=localStorage.view||'reg', cart={}, pay={recv:'',don:'',name:'',anon:false,note:''}, seenReq=new Set(), first=true;
 const $=s=>document.querySelector(s), yen=n=>'¥'+(n||0).toLocaleString();
 const P=id=>S.products.find(p=>p.id===id);
 const act=(type,a={})=>window.fbAct(type,a).catch(e=>alert('通信エラー: '+e.message));
@@ -95,7 +95,8 @@ document.querySelector('nav').onclick=e=>{const v=e.target.dataset.v;if(v){view=
 /* ---------- A. レジ ---------- */
 const cartTotal=()=>Object.entries(cart).reduce((s,[id,q])=>s+P(id).price*q,0);
 function regView(){
-  const total=cartTotal(), recv=+pay.recv||0, change=recv-total, don=+pay.don||0;
+  const total=cartTotal(), tv=S.ticketValue??300, tAmt=Math.min(tix*tv,total), due=total-tAmt;
+  const recv=+pay.recv||0, change=recv-due, don=+pay.don||0;
   const waiting=S.requests.filter(r=>r.status==='delivering');
   const pend=S.requests.filter(r=>r.status==='requested');
   let h='';
@@ -114,17 +115,23 @@ function regView(){
       <button class="btn sub" onclick="addCart('${id}',-1)">−</button><b style="min-width:24px;text-align:center">${q}</b>
       <button class="btn sub" onclick="addCart('${id}',1)">＋</button></div>`).join(''):'<div class="mut">品目タイルをタップ</div>')+
     `<div class="big">合計 ${yen(total)}</div>
+    <div class="row" style="margin:8px 0;padding:8px;border:1px dashed var(--line);border-radius:10px">
+      <div class="grow">🎫 前売券（1枚 ${yen(tv)}）</div>
+      <button class="btn sub" onclick="tix=Math.max(0,tix-1);render()">−</button><b style="min-width:24px;text-align:center">${tix}</b>
+      <button class="btn sub" onclick="tix++;render()">＋</button></div>
+    ${tix?`<div class="mut">券で ${yen(tAmt)} 引換${tix*tv>total?`（券面超過 ${yen(tix*tv-total)}・釣銭なし）`:''}</div>
+    <div class="big">お支払い ${yen(due)}</div>`:''}
     <div class="row" style="margin-top:8px"><div class="grow"><div class="mut">預かり金</div><input id="recv" type="number" inputmode="numeric" value="${pay.recv}" oninput="pay.recv=this.value;soft()"></div>
     <div class="grow"><div class="mut">お釣り</div><div class="big ${change<0?'neg':''}">${recv?yen(change):'-'}</div></div></div>
     <div class="row" style="margin-top:6px">${[500,1000,5000,10000].map(v=>`<button class="btn sub" onclick="pay.recv=${v};render()">${yen(v)}</button>`).join('')}
-    <button class="btn sub" onclick="pay.recv=${total};render()">ちょうど</button></div></div>`;
+    <button class="btn sub" onclick="pay.recv=${due};render()">ちょうど</button></div></div>`;
   h+=`<div class="card"><h2>💝 寄付金（売上に含めません）</h2>
     <div class="row"><div class="grow"><input id="don" type="number" inputmode="numeric" placeholder="寄付金額" value="${pay.don}" oninput="pay.don=this.value;soft()"></div>
     <button class="btn sub" ${change>0?'':'disabled'} onclick="pay.don=${Math.max(change,0)};render()">お釣りを寄付 (${yen(Math.max(change,0))})</button></div>
     <div class="row" style="margin-top:8px"><div class="grow"><input id="dname" type="text" placeholder="寄付者名（任意）" value="${esc(pay.name)}" ${pay.anon?'disabled':''} oninput="pay.name=this.value"></div>
     <button class="btn ${pay.anon?'':'sub'}" onclick="pay.anon=!pay.anon;render()">匿名</button></div>
     <input id="dnote" type="text" style="margin-top:8px" placeholder="応援メッセージ・概要" value="${esc(pay.note)}" oninput="pay.note=this.value"></div>`;
-  h+=`<button class="btn" style="width:100%;font-size:20px;padding:16px" ${total||don?'':'disabled'} onclick="checkout()">会計確定 ${yen(total)}${don?` ＋ 寄付 ${yen(don)}`:''}</button>`;
+  h+=`<button class="btn" style="width:100%;font-size:20px;padding:16px" ${total||don?'':'disabled'} onclick="checkout()">会計確定 ${yen(due)}${tAmt?`（券 ${yen(tAmt)}）`:''}${don?` ＋ 寄付 ${yen(don)}`:''}</button>`;
   h+=`<div class="card" style="margin-top:12px"><h2>📦 補充発注</h2><div class="row">`+
     managed().map(p=>`<button class="btn sub grow" onclick="act('request',{product_id:'${p.id}',qty:10})">${p.name.replace('小','')} ＋10 発注</button>`).join('')+`</div>`+
     pend.map(r=>`<div class="mut" style="margin-top:6px">⏳ 依頼中: ${P(r.product_id).name} ×${r.qty}（${hhmm(r.created_at)}）</div>`).join('')+`</div>`;
@@ -139,8 +146,8 @@ function soft(){ // 入力中は全再描画せず合計関連のみ更新
 function addCart(id,d){cart[id]=Math.max(0,(cart[id]||0)+d);if(!cart[id])delete cart[id];render()}
 async function checkout(){
   const items=Object.entries(cart).map(([id,qty])=>({id,qty})), don=+pay.don||0;
-  await act('sale',{items,cashReceived:+pay.recv||null,donation:don>0?{amount:don,name:pay.name,anon:pay.anon,note:pay.note}:null});
-  cart={};pay={recv:'',don:'',name:'',anon:false,note:''};render();
+  await act('sale',{items,cashReceived:+pay.recv||null,tickets:tix,donation:don>0?{amount:don,name:pay.name,anon:pay.anon,note:pay.note}:null});
+  cart={};tix=0;pay={recv:'',don:'',name:'',anon:false,note:''};render();
 }
 
 /* ---------- B. 調理場 ---------- */
@@ -167,13 +174,15 @@ function calc(){
   S.products.forEach(p=>sum[p.id]={name:p.name,qty:0,amt:0});
   ok.forEach(o=>o.items.forEach(l=>{(sum[l.product_id]||={name:l.name,qty:0,amt:0});sum[l.product_id].qty+=l.qty;sum[l.product_id].amt+=l.unit_price*l.qty}));
   const sales=Object.values(sum).reduce((s,x)=>s+x.amt,0), don=S.donations.reduce((s,d)=>s+d.amount,0);
-  const theory=S.register.opening+sales+don, cl=S.register.closing;
-  return {sum,sales,don,theory,diff:cl==null?null:cl-theory};
+  const tix=ok.reduce((s,o)=>s+(o.ticket_amount||0),0), tcnt=ok.reduce((s,o)=>s+(o.tickets_used||0),0);
+  const theory=S.register.opening+sales-tix+don, cl=S.register.closing;
+  return {sum,sales,don,tix,tcnt,theory,diff:cl==null?null:cl-theory};
 }
 function admView(){
   const c=calc(), r=S.register;
   let h=`<div class="grid"><div class="card"><div class="mut">商品総売上</div><div class="big">${yen(c.sales)}</div></div>
   <div class="card"><div class="mut">寄付金総額</div><div class="big">${yen(c.don)}</div></div>
+  <div class="card"><div class="mut">前売券引換（${c.tcnt}枚）</div><div class="big">${yen(c.tix)}</div></div>
   <div class="card"><div class="mut">理論手元現金</div><div class="big">${yen(c.theory)}</div></div></div>`;
   h+=`<div class="card"><h2>商品別売上</h2><table><tr><th>品目</th><th class="n">数量</th><th class="n">小計</th></tr>`+
     Object.values(c.sum).map(x=>`<tr><td>${x.name}</td><td class="n">${x.qty}</td><td class="n">${yen(x.amt)}</td></tr>`).join('')+
@@ -183,7 +192,7 @@ function admView(){
     <div class="mut" style="margin-top:8px">終了時 実査手元現金</div><input id="close" type="number" inputmode="numeric" value="${r.closing??''}" placeholder="実際に数えた金額">
     <div class="row" style="margin-top:8px"><button class="btn grow" onclick="act('closeRegister',{closing:$('#close').value||0})">精算する</button>
     ${r.closedAt?`<button class="btn sub" onclick="act('reopenRegister')">再開</button>`:''}</div>
-    <div class="mut" style="margin-top:8px">理論手元現金 = 準備金 ${yen(r.opening)} ＋ 売上 ${yen(c.sales)} ＋ 寄付 ${yen(c.don)} = <b>${yen(c.theory)}</b></div>
+    <div class="mut" style="margin-top:8px">理論手元現金 = 準備金 ${yen(r.opening)} ＋ 売上 ${yen(c.sales)} − 前売券引換 ${yen(c.tix)} ＋ 寄付 ${yen(c.don)} = <b>${yen(c.theory)}</b></div>
     ${c.diff!=null?`<div class="big ${c.diff===0?'pos':'neg'}">${c.diff===0?'✅ 過不足なし':c.diff<0?`⚠ 不足 ${yen(-c.diff)}`:`⚠ 過剰 ${yen(c.diff)}`}</div>`:''}</div>`;
   h+=`<div class="card"><h2>💝 寄付金一覧（${yen(c.don)}）</h2>`+(S.donations.length?`<table><tr><th>時刻</th><th>名前</th><th class="n">金額</th><th>メッセージ</th><th></th></tr>`+
     S.donations.slice().reverse().map(d=>`<tr><td>${hhmm(d.timestamp)}</td><td>${esc(d.donor_name)}</td><td class="n">${yen(d.amount)}</td><td>${esc(d.note)}</td>
@@ -191,7 +200,8 @@ function admView(){
   h+=`<div class="card"><h2>⚙ 価格・在庫設定</h2>`+S.products.map(p=>`<div class="row" style="margin-bottom:8px"><div class="grow">${p.name}</div>
     <input type="number" inputmode="numeric" style="width:100px" value="${p.price}" onchange="act('setPrice',{id:'${p.id}',price:this.value})">円
     ${p.managed?`<span class="mut">店先在庫</span><input type="number" style="width:80px" value="${S.inventory[p.id].store}" onchange="act('adjustStore',{product_id:'${p.id}',qty:this.value})">`:''}</div>`).join('')+
-    `<div class="mut">※価格変更は以降の会計のみに反映。過去の注文は購入時単価のまま。</div></div>`;
+    `<div class="row" style="margin:8px 0"><div class="grow">前売券 1枚の券面額</div><input type="number" inputmode="numeric" style="width:100px" value="${S.ticketValue??300}" onchange="act('setTicketValue',{value:this.value})">円</div>
+    <div class="mut">※価格変更は以降の会計のみに反映。過去の注文は購入時単価のまま。</div></div>`;
   h+=`<div class="row"><button class="btn" onclick="csv()">日計レポート CSV出力</button>
     <button class="btn ng" onclick="if(confirm('全データを消去します。よろしいですか？')&&confirm('本当に消去しますか？'))act('reset')">全データ初期化</button></div>`;
   return h;
@@ -199,9 +209,9 @@ function admView(){
 function csv(){
   const c=calc(), L=[['日計レポート',new Date().toLocaleString('ja-JP')],[],['品目','数量','小計']];
   Object.values(c.sum).forEach(x=>L.push([x.name,x.qty,x.amt]));
-  L.push(['商品総売上',,c.sales],['寄付金総額',,c.don],['開始時準備金',,S.register.opening],['理論手元現金',,c.theory],
-    ['実査手元現金',,S.register.closing??''],['過不足',,c.diff??''],[],['注文ID','時刻','明細','合計','状態']);
-  S.orders.forEach(o=>L.push([o.order_id,new Date(o.created_at).toLocaleString('ja-JP'),o.items.map(i=>`${i.name}×${i.qty}@${i.unit_price}`).join(' / '),o.total_sales,o.cancelled?'取消':'有効']));
+  L.push(['商品総売上',,c.sales],['前売券引換枚数',,c.tcnt],['前売券引換額',,c.tix],['寄付金総額',,c.don],['開始時準備金',,S.register.opening],['理論手元現金',,c.theory],
+    ['実査手元現金',,S.register.closing??''],['過不足',,c.diff??''],[],['注文ID','時刻','明細','合計','前売券枚数','券引換額','状態']);
+  S.orders.forEach(o=>L.push([o.order_id,new Date(o.created_at).toLocaleString('ja-JP'),o.items.map(i=>`${i.name}×${i.qty}@${i.unit_price}`).join(' / '),o.total_sales,o.tickets_used||0,o.ticket_amount||0,o.cancelled?'取消':'有効']));
   L.push([],['寄付ID','時刻','名前','金額','メッセージ']);
   S.donations.forEach(d=>L.push([d.donation_id,new Date(d.timestamp).toLocaleString('ja-JP'),d.donor_name,d.amount,d.note]));
   const t=L.map(r=>r.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n');
