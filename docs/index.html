@@ -35,10 +35,10 @@ td.n,th.n{text-align:right}
 .warnmsg{color:var(--ng);font-weight:700;font-size:13px}
 .hide{display:none}
 </style></head><body>
-<header><h1>🥟 EventPOS & Kitchen</h1><button id="bell" onclick="cycleNotify()" style="background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:6px 10px"></button><span id="dot"></span>
+<header><h1>🥟 EventPOS & Kitchen <small style="font-weight:400;opacity:.8">v1.3</small></h1><button id="bell" onclick="cycleNotify()" style="background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:6px 10px"></button><span id="dot"></span>
 <nav><button data-v="reg">レジ</button><button data-v="kit">調理場</button><button data-v="adm">管理</button></nav></header>
 <main id="app"></main>
-<script type="module" src="store.js"></script>
+<script type="module" src="store.js?v=13"></script>
 <script>
 let S=null, tix={}, lastStatus={}, notifyRole=localStorage.notifyRole||'off', swReg=null, view=localStorage.view||'reg', cart={}, pay={recv:'',don:'',name:'',anon:false,note:''}, seenReq=new Set(), first=true;
 const $=s=>document.querySelector(s), yen=n=>'¥'+(n||0).toLocaleString();
