@@ -37,23 +37,23 @@ td.n,th.n{text-align:right}
 <header><h1>🥟 EventPOS & Kitchen</h1><span id="dot"></span>
 <nav><button data-v="reg">レジ</button><button data-v="kit">調理場</button><button data-v="adm">管理</button></nav></header>
 <main id="app"></main>
+<script type="module" src="store.js"></script>
 <script>
 let S=null, view=localStorage.view||'reg', cart={}, pay={recv:'',don:'',name:'',anon:false,note:''}, seenReq=new Set(), first=true;
 const $=s=>document.querySelector(s), yen=n=>'¥'+(n||0).toLocaleString();
 const P=id=>S.products.find(p=>p.id===id);
-const act=(type,a={})=>fetch('/api/action',{method:'POST',body:JSON.stringify({type,...a})});
+const act=(type,a={})=>window.fbAct(type,a).catch(e=>alert('通信エラー: '+e.message));
 const hhmm=t=>new Date(t).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const managed=()=>S.products.filter(p=>p.managed);
 
 function connect(){
-  const es=new EventSource('/api/events');
-  es.onopen=()=>$('#dot').classList.add('on');
-  es.onerror=()=>$('#dot').classList.remove('on');
-  es.onmessage=e=>{S=JSON.parse(e.data);
-    // 新規の補充要請を調理場で通知
+  const go=()=>window.fbWatch(st=>{S=st;
     S.requests.filter(r=>r.status==='requested'&&!seenReq.has(r.id)).forEach(r=>{ if(!first&&view==='kit')beep(); });
-    S.requests.forEach(r=>seenReq.add(r.id)); first=false; render();};
+    S.requests.forEach(r=>seenReq.add(r.id)); first=false; render();},
+    s=>{ $('#dot').classList.toggle('on',s==='online');
+      if(s==='config')$('#app').innerHTML='<div class="card"><h2>Firebase 未設定</h2>docs/firebase-config.js に firebaseConfig を設定してください。</div>'; });
+  window.fbWatch?go():window.addEventListener('fb-ready',go);
 }
 function beep(){try{const c=new AudioContext(),o=c.createOscillator();o.connect(c.destination);o.frequency.value=880;o.start();o.stop(c.currentTime+.4);navigator.vibrate&&navigator.vibrate(200)}catch{}}
 

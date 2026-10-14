@@ -1,3 +1,4 @@
 # EventPOS & Kitchen
-起動: `node server.js` → http://localhost:3000 （同一Wi-Fiの端末は表示されるIPで接続）
-画面: レジ / 調理場 / 管理。データは data.json に保存。
+GitHub Pages (docs/) で画面を配信し、Firebase Firestore にデータを保存・同期します。
+設定: docs/firebase-config.js に firebaseConfig を記入。
+Firestore ルール例は FIRESTORE_RULES.txt を参照。
