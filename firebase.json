@@ -1,0 +1,1 @@
+{ "firestore": { "database": "(default)", "location": "asia-northeast1", "rules": "firestore.rules" } }
