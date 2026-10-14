@@ -40,7 +40,7 @@ td.n,th.n{text-align:right}
 <main id="app"></main>
 <script type="module" src="store.js"></script>
 <script>
-let S=null, tix=0, lastStatus={}, notifyRole=localStorage.notifyRole||'off', swReg=null, view=localStorage.view||'reg', cart={}, pay={recv:'',don:'',name:'',anon:false,note:''}, seenReq=new Set(), first=true;
+let S=null, tix={}, lastStatus={}, notifyRole=localStorage.notifyRole||'off', swReg=null, view=localStorage.view||'reg', cart={}, pay={recv:'',don:'',name:'',anon:false,note:''}, seenReq=new Set(), first=true;
 const $=s=>document.querySelector(s), yen=n=>'¥'+(n||0).toLocaleString();
 const P=id=>S.products.find(p=>p.id===id);
 const act=(type,a={})=>window.fbAct(type,a).catch(e=>alert('通信エラー: '+e.message));
@@ -95,7 +95,8 @@ document.querySelector('nav').onclick=e=>{const v=e.target.dataset.v;if(v){view=
 /* ---------- A. レジ ---------- */
 const cartTotal=()=>Object.entries(cart).reduce((s,[id,q])=>s+P(id).price*q,0);
 function regView(){
-  const total=cartTotal(), tv=S.ticketValue??300, tAmt=Math.min(tix*tv,total), due=total-tAmt;
+  const total=cartTotal(), tk=tixEff(), tCnt=Object.values(tk).reduce((a,b)=>a+b,0);
+  const tAmt=Object.entries(tk).reduce((s,[id,n])=>s+P(id).price*n,0), due=total-tAmt;
   const recv=+pay.recv||0, change=recv-due, don=+pay.don||0;
   const waiting=S.requests.filter(r=>r.status==='delivering');
   const pend=S.requests.filter(r=>r.status==='requested');
@@ -115,12 +116,12 @@ function regView(){
       <button class="btn sub" onclick="addCart('${id}',-1)">−</button><b style="min-width:24px;text-align:center">${q}</b>
       <button class="btn sub" onclick="addCart('${id}',1)">＋</button></div>`).join(''):'<div class="mut">品目タイルをタップ</div>')+
     `<div class="big">合計 ${yen(total)}</div>
-    <div class="row" style="margin:8px 0;padding:8px;border:1px dashed var(--line);border-radius:10px">
-      <div class="grow">🎫 前売券（1枚 ${yen(tv)}）</div>
-      <button class="btn sub" onclick="tix=Math.max(0,tix-1);render()">−</button><b style="min-width:24px;text-align:center">${tix}</b>
-      <button class="btn sub" onclick="tix++;render()">＋</button></div>
-    ${tix?`<div class="mut">券で ${yen(tAmt)} 引換${tix*tv>total?`（券面超過 ${yen(tix*tv-total)}・釣銭なし）`:''}</div>
-    <div class="big">お支払い ${yen(due)}</div>`:''}
+    ${managed().length?`<div style="margin:8px 0;padding:8px;border:1px dashed var(--line);border-radius:10px">`+managed().map(p=>{
+      const n=tk[p.id]||0, mx=cart[p.id]||0;
+      return `<div class="row" style="margin-bottom:4px"><div class="grow">🎫 ${p.name}券</div>
+      <button class="btn sub" onclick="tixAdd('${p.id}',-1)">−</button><b style="min-width:24px;text-align:center">${n}</b>
+      <button class="btn sub" ${n>=mx?'disabled':''} onclick="tixAdd('${p.id}',1)">＋</button></div>`}).join('')+`</div>`:''}
+    ${tCnt?`<div class="mut">前売券 ${tCnt}枚で ${yen(tAmt)} 引換</div><div class="big">お支払い ${yen(due)}</div>`:''}
     <div class="row" style="margin-top:8px"><div class="grow"><div class="mut">預かり金</div><input id="recv" type="number" inputmode="numeric" value="${pay.recv}" oninput="pay.recv=this.value;soft()"></div>
     <div class="grow"><div class="mut">お釣り</div><div class="big ${change<0?'neg':''}">${recv?yen(change):'-'}</div></div></div>
     <div class="row" style="margin-top:6px">${[500,1000,5000,10000].map(v=>`<button class="btn sub" onclick="pay.recv=${v};render()">${yen(v)}</button>`).join('')}
@@ -131,7 +132,7 @@ function regView(){
     <div class="row" style="margin-top:8px"><div class="grow"><input id="dname" type="text" placeholder="寄付者名（任意）" value="${esc(pay.name)}" ${pay.anon?'disabled':''} oninput="pay.name=this.value"></div>
     <button class="btn ${pay.anon?'':'sub'}" onclick="pay.anon=!pay.anon;render()">匿名</button></div>
     <input id="dnote" type="text" style="margin-top:8px" placeholder="応援メッセージ・概要" value="${esc(pay.note)}" oninput="pay.note=this.value"></div>`;
-  h+=`<button class="btn" style="width:100%;font-size:20px;padding:16px" ${total||don?'':'disabled'} onclick="checkout()">会計確定 ${yen(due)}${tAmt?`（券 ${yen(tAmt)}）`:''}${don?` ＋ 寄付 ${yen(don)}`:''}</button>`;
+  h+=`<button class="btn" style="width:100%;font-size:20px;padding:16px" ${total||don?'':'disabled'} onclick="checkout()">会計確定 ${yen(due)}${tAmt?`（券${tCnt}枚）`:''}${don?` ＋ 寄付 ${yen(don)}`:''}</button>`;
   h+=`<div class="card" style="margin-top:12px"><h2>📦 補充発注</h2><div class="row">`+
     managed().map(p=>`<button class="btn sub grow" onclick="act('request',{product_id:'${p.id}',qty:10})">${p.name.replace('小','')} ＋10 発注</button>`).join('')+`</div>`+
     pend.map(r=>`<div class="mut" style="margin-top:6px">⏳ 依頼中: ${P(r.product_id).name} ×${r.qty}（${hhmm(r.created_at)}）</div>`).join('')+`</div>`;
@@ -143,11 +144,13 @@ function regView(){
 function soft(){ // 入力中は全再描画せず合計関連のみ更新
   const f=document.activeElement.id; render();
 }
+function tixEff(){const o={};Object.entries(tix).forEach(([id,n])=>{const m=Math.min(n,cart[id]||0);if(m>0)o[id]=m});return o}
+function tixAdd(id,d){const m=cart[id]||0;tix[id]=Math.min(m,Math.max(0,(tix[id]||0)+d));render()}
 function addCart(id,d){cart[id]=Math.max(0,(cart[id]||0)+d);if(!cart[id])delete cart[id];render()}
 async function checkout(){
   const items=Object.entries(cart).map(([id,qty])=>({id,qty})), don=+pay.don||0;
-  await act('sale',{items,cashReceived:+pay.recv||null,tickets:tix,donation:don>0?{amount:don,name:pay.name,anon:pay.anon,note:pay.note}:null});
-  cart={};tix=0;pay={recv:'',don:'',name:'',anon:false,note:''};render();
+  await act('sale',{items,cashReceived:+pay.recv||null,tickets:tixEff(),donation:don>0?{amount:don,name:pay.name,anon:pay.anon,note:pay.note}:null});
+  cart={};tix={};pay={recv:'',don:'',name:'',anon:false,note:''};render();
 }
 
 /* ---------- B. 調理場 ---------- */
@@ -171,8 +174,8 @@ function kitView(){
 /* ---------- 管理 ---------- */
 function calc(){
   const ok=S.orders.filter(o=>!o.cancelled), sum={};
-  S.products.forEach(p=>sum[p.id]={name:p.name,qty:0,amt:0});
-  ok.forEach(o=>o.items.forEach(l=>{(sum[l.product_id]||={name:l.name,qty:0,amt:0});sum[l.product_id].qty+=l.qty;sum[l.product_id].amt+=l.unit_price*l.qty}));
+  S.products.forEach(p=>sum[p.id]={name:p.name,qty:0,amt:0,tix:0});
+  ok.forEach(o=>o.items.forEach(l=>{(sum[l.product_id]||={name:l.name,qty:0,amt:0});sum[l.product_id].qty+=l.qty;sum[l.product_id].tix+=l.ticket_qty||0;sum[l.product_id].amt+=l.unit_price*l.qty}));
   const sales=Object.values(sum).reduce((s,x)=>s+x.amt,0), don=S.donations.reduce((s,d)=>s+d.amount,0);
   const tix=ok.reduce((s,o)=>s+(o.ticket_amount||0),0), tcnt=ok.reduce((s,o)=>s+(o.tickets_used||0),0);
   const theory=S.register.opening+sales-tix+don, cl=S.register.closing;
@@ -182,7 +185,7 @@ function admView(){
   const c=calc(), r=S.register;
   let h=`<div class="grid"><div class="card"><div class="mut">商品総売上</div><div class="big">${yen(c.sales)}</div></div>
   <div class="card"><div class="mut">寄付金総額</div><div class="big">${yen(c.don)}</div></div>
-  <div class="card"><div class="mut">前売券引換（${c.tcnt}枚）</div><div class="big">${yen(c.tix)}</div></div>
+  <div class="card"><div class="mut">前売券引換（${Object.values(c.sum).filter(x=>x.tix).map(x=>x.name+x.tix+'枚').join('・')||'0枚'}）</div><div class="big">${yen(c.tix)}</div></div>
   <div class="card"><div class="mut">理論手元現金</div><div class="big">${yen(c.theory)}</div></div></div>`;
   h+=`<div class="card"><h2>商品別売上</h2><table><tr><th>品目</th><th class="n">数量</th><th class="n">小計</th></tr>`+
     Object.values(c.sum).map(x=>`<tr><td>${x.name}</td><td class="n">${x.qty}</td><td class="n">${yen(x.amt)}</td></tr>`).join('')+
@@ -200,8 +203,7 @@ function admView(){
   h+=`<div class="card"><h2>⚙ 価格・在庫設定</h2>`+S.products.map(p=>`<div class="row" style="margin-bottom:8px"><div class="grow">${p.name}</div>
     <input type="number" inputmode="numeric" style="width:100px" value="${p.price}" onchange="act('setPrice',{id:'${p.id}',price:this.value})">円
     ${p.managed?`<span class="mut">店先在庫</span><input type="number" style="width:80px" value="${S.inventory[p.id].store}" onchange="act('adjustStore',{product_id:'${p.id}',qty:this.value})">`:''}</div>`).join('')+
-    `<div class="row" style="margin:8px 0"><div class="grow">前売券 1枚の券面額</div><input type="number" inputmode="numeric" style="width:100px" value="${S.ticketValue??300}" onchange="act('setTicketValue',{value:this.value})">円</div>
-    <div class="mut">※価格変更は以降の会計のみに反映。過去の注文は購入時単価のまま。</div></div>`;
+    `<div class="mut">※価格変更は以降の会計のみに反映。過去の注文は購入時単価のまま。前売券は「1枚＝その品目1個」で、引換額は会計時の単価です。</div></div>`;
   h+=`<div class="row"><button class="btn" onclick="csv()">日計レポート CSV出力</button>
     <button class="btn ng" onclick="if(confirm('全データを消去します。よろしいですか？')&&confirm('本当に消去しますか？'))act('reset')">全データ初期化</button></div>`;
   return h;

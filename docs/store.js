@@ -22,17 +22,18 @@ function apply(S, type, a) {
   const inv = (id) => (S.inventory[id] ||= { store: 0, kitchen: 0, transit: 0 });
   const A = {
     sale({ items, donation, cashReceived, tickets }) {
-      const lines = (items || []).filter((i) => i.qty > 0 && prod(i.id)).map((i) => ({
-        product_id: i.id, name: prod(i.id).name, qty: i.qty | 0, unit_price: prod(i.id).price, // 購入時点単価を固定
-      }));
+      const lines = (items || []).filter((i) => i.qty > 0 && prod(i.id)).map((i) => {
+        const qty = i.qty | 0, p = prod(i.id);
+        const tk = p.managed ? Math.min(Math.max(0, (tickets?.[i.id] | 0)), qty) : 0; // 前売券（品目ごと・1枚=1個）
+        return { product_id: i.id, name: p.name, qty, unit_price: p.price, ticket_qty: tk }; // 購入時点単価を固定
+      });
       let orderId = null;
       if (lines.length) {
         orderId = nid('O');
         const total = lines.reduce((s, l) => s + l.unit_price * l.qty, 0);
-        const tv = S.ticketValue ?? 300, tn = Math.max(0, (tickets | 0));
-        const tAmt = Math.min(tn * tv, total); // 前売券での引換額（購入時の券面額を固定記録）
+        const tAmt = lines.reduce((s, l) => s + l.unit_price * l.ticket_qty, 0);
         S.orders.push({ order_id: orderId, created_at: Date.now(), items: lines, total_sales: total, cash_received: cashReceived ?? null,
-          tickets_used: tn, ticket_value: tv, ticket_amount: tAmt, cash_due: total - tAmt, cancelled: false });
+          tickets_used: lines.reduce((s, l) => s + l.ticket_qty, 0), ticket_amount: tAmt, cash_due: total - tAmt, cancelled: false });
         lines.forEach((l) => { if (prod(l.product_id).managed) inv(l.product_id).store -= l.qty; });
       }
       if (donation && donation.amount > 0) {
@@ -61,7 +62,6 @@ function apply(S, type, a) {
       r.status = 'received'; const i = inv(r.product_id); i.transit -= r.qty; i.store += r.qty;
     },
     addKitchen({ product_id, qty }) { inv(product_id).kitchen += qty | 0; },
-    setTicketValue({ value }) { if (value >= 0) S.ticketValue = value | 0; },
     setPrice({ id, price }) { const p = prod(id); if (p && price >= 0) p.price = price | 0; },
     adjustStore({ product_id, qty }) { inv(product_id).store = qty | 0; },
     setOpening({ amount }) { S.register.opening = amount | 0; },
