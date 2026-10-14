@@ -35,10 +35,10 @@ td.n,th.n{text-align:right}
 .warnmsg{color:var(--ng);font-weight:700;font-size:13px}
 .hide{display:none}
 </style></head><body>
-<header><h1>🥟 EventPOS & Kitchen <small style="font-weight:400;opacity:.8">v1.3</small></h1><button id="bell" onclick="cycleNotify()" style="background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:6px 10px"></button><span id="dot"></span>
+<header><h1>🥟 EventPOS & Kitchen <small style="font-weight:400;opacity:.8">v1.4</small></h1><button id="bell" onclick="cycleNotify()" style="background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:6px 10px"></button><span id="dot"></span>
 <nav><button data-v="reg">レジ</button><button data-v="kit">調理場</button><button data-v="adm">管理</button></nav></header>
 <main id="app"></main>
-<script type="module" src="store.js?v=13"></script>
+<script type="module" src="store.js?v=14"></script>
 <script>
 let S=null, tix={}, lastStatus={}, notifyRole=localStorage.notifyRole||'off', swReg=null, view=localStorage.view||'reg', cart={}, pay={recv:'',don:'',name:'',anon:false,note:''}, seenReq=new Set(), first=true;
 const $=s=>document.querySelector(s), yen=n=>'¥'+(n||0).toLocaleString();
@@ -175,27 +175,27 @@ function kitView(){
 function calc(){
   const ok=S.orders.filter(o=>!o.cancelled), sum={};
   S.products.forEach(p=>sum[p.id]={name:p.name,qty:0,amt:0,tix:0});
-  ok.forEach(o=>o.items.forEach(l=>{(sum[l.product_id]||={name:l.name,qty:0,amt:0});sum[l.product_id].qty+=l.qty;sum[l.product_id].tix+=l.ticket_qty||0;sum[l.product_id].amt+=l.unit_price*l.qty}));
+  ok.forEach(o=>o.items.forEach(l=>{(sum[l.product_id]||={name:l.name,qty:0,amt:0});sum[l.product_id].qty+=l.qty;sum[l.product_id].tix+=l.ticket_qty||0;sum[l.product_id].amt+=l.unit_price*(l.qty-(l.ticket_qty||0))}));
   const sales=Object.values(sum).reduce((s,x)=>s+x.amt,0), don=S.donations.reduce((s,d)=>s+d.amount,0);
   const tix=ok.reduce((s,o)=>s+(o.ticket_amount||0),0), tcnt=ok.reduce((s,o)=>s+(o.tickets_used||0),0);
-  const theory=S.register.opening+sales-tix+don, cl=S.register.closing;
+  const theory=S.register.opening+sales+don, cl=S.register.closing;
   return {sum,sales,don,tix,tcnt,theory,diff:cl==null?null:cl-theory};
 }
 function admView(){
   const c=calc(), r=S.register;
-  let h=`<div class="grid"><div class="card"><div class="mut">商品総売上</div><div class="big">${yen(c.sales)}</div></div>
+  let h=`<div class="grid"><div class="card"><div class="mut">商品総売上（前売券引換を除く）</div><div class="big">${yen(c.sales)}</div></div>
   <div class="card"><div class="mut">寄付金総額</div><div class="big">${yen(c.don)}</div></div>
-  <div class="card"><div class="mut">前売券引換（${Object.values(c.sum).filter(x=>x.tix).map(x=>x.name+x.tix+'枚').join('・')||'0枚'}）</div><div class="big">${yen(c.tix)}</div></div>
+  <div class="card"><div class="mut">前売券引換・手元金は増減なし（${Object.values(c.sum).filter(x=>x.tix).map(x=>x.name+x.tix+'枚').join('・')||'0枚'}）</div><div class="big">${yen(c.tix)}</div></div>
   <div class="card"><div class="mut">理論手元現金</div><div class="big">${yen(c.theory)}</div></div></div>`;
-  h+=`<div class="card"><h2>商品別売上</h2><table><tr><th>品目</th><th class="n">数量</th><th class="n">小計</th></tr>`+
-    Object.values(c.sum).map(x=>`<tr><td>${x.name}</td><td class="n">${x.qty}</td><td class="n">${yen(x.amt)}</td></tr>`).join('')+
-    `<tr><th>合計</th><th class="n">${Object.values(c.sum).reduce((s,x)=>s+x.qty,0)}</th><th class="n">${yen(c.sales)}</th></tr></table></div>`;
+  h+=`<div class="card"><h2>商品別売上</h2><table><tr><th>品目</th><th class="n">数量</th><th class="n">うち前売券</th><th class="n">小計(現金売上)</th></tr>`+
+    Object.values(c.sum).map(x=>`<tr><td>${x.name}</td><td class="n">${x.qty}</td><td class="n">${x.tix}</td><td class="n">${yen(x.amt)}</td></tr>`).join('')+
+    `<tr><th>合計</th><th class="n">${Object.values(c.sum).reduce((s,x)=>s+x.qty,0)}</th><th class="n">${c.tcnt}</th><th class="n">${yen(c.sales)}</th></tr></table></div>`;
   h+=`<div class="card"><h2>🧮 レジ点検・精算</h2>
     <div class="mut">開始時釣銭準備金</div><input id="open" type="number" inputmode="numeric" value="${r.opening}" onchange="act('setOpening',{amount:this.value})">
     <div class="mut" style="margin-top:8px">終了時 実査手元現金</div><input id="close" type="number" inputmode="numeric" value="${r.closing??''}" placeholder="実際に数えた金額">
     <div class="row" style="margin-top:8px"><button class="btn grow" onclick="act('closeRegister',{closing:$('#close').value||0})">精算する</button>
     ${r.closedAt?`<button class="btn sub" onclick="act('reopenRegister')">再開</button>`:''}</div>
-    <div class="mut" style="margin-top:8px">理論手元現金 = 準備金 ${yen(r.opening)} ＋ 売上 ${yen(c.sales)} − 前売券引換 ${yen(c.tix)} ＋ 寄付 ${yen(c.don)} = <b>${yen(c.theory)}</b></div>
+    <div class="mut" style="margin-top:8px">理論手元現金 = 準備金 ${yen(r.opening)} ＋ 売上 ${yen(c.sales)} ＋ 寄付 ${yen(c.don)} = <b>${yen(c.theory)}</b></div>
     ${c.diff!=null?`<div class="big ${c.diff===0?'pos':'neg'}">${c.diff===0?'✅ 過不足なし':c.diff<0?`⚠ 不足 ${yen(-c.diff)}`:`⚠ 過剰 ${yen(c.diff)}`}</div>`:''}</div>`;
   h+=`<div class="card"><h2>💝 寄付金一覧（${yen(c.don)}）</h2>`+(S.donations.length?`<table><tr><th>時刻</th><th>名前</th><th class="n">金額</th><th>メッセージ</th><th></th></tr>`+
     S.donations.slice().reverse().map(d=>`<tr><td>${hhmm(d.timestamp)}</td><td>${esc(d.donor_name)}</td><td class="n">${yen(d.amount)}</td><td>${esc(d.note)}</td>
@@ -210,8 +210,8 @@ function admView(){
 }
 function csv(){
   const c=calc(), L=[['日計レポート',new Date().toLocaleString('ja-JP')],[],['品目','数量','小計']];
-  Object.values(c.sum).forEach(x=>L.push([x.name,x.qty,x.amt]));
-  L.push(['商品総売上',,c.sales],['前売券引換枚数',,c.tcnt],['前売券引換額',,c.tix],['寄付金総額',,c.don],['開始時準備金',,S.register.opening],['理論手元現金',,c.theory],
+  Object.values(c.sum).forEach(x=>L.push([x.name,x.qty+'(うち前売券'+x.tix+')',x.amt]));
+  L.push(['商品総売上',,c.sales],['前売券引換枚数',,c.tcnt],['前売券引換額(売上・手元金に含めない)',,c.tix],['寄付金総額',,c.don],['開始時準備金',,S.register.opening],['理論手元現金',,c.theory],
     ['実査手元現金',,S.register.closing??''],['過不足',,c.diff??''],[],['注文ID','時刻','明細','合計','前売券枚数','券引換額','状態']);
   S.orders.forEach(o=>L.push([o.order_id,new Date(o.created_at).toLocaleString('ja-JP'),o.items.map(i=>`${i.name}×${i.qty}@${i.unit_price}`).join(' / '),o.total_sales,o.tickets_used||0,o.ticket_amount||0,o.cancelled?'取消':'有効']));
   L.push([],['寄付ID','時刻','名前','金額','メッセージ']);
