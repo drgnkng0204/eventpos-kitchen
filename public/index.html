@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>EventPOS & Kitchen</title>
+<style>
+:root{--bg:#f4f1ea;--card:#fff;--ink:#222;--mut:#777;--pri:#d9480f;--ok:#2b8a3e;--warn:#e8a900;--ng:#e03131;--line:#e3ded2}
+@media(prefers-color-scheme:dark){:root{--bg:#1c1b19;--card:#292723;--ink:#f1eee6;--mut:#a09a8c;--line:#3d3a33}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,"Hiragino Sans",sans-serif}
+header{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--pri);color:#fff;position:sticky;top:0;z-index:5}
+header h1{font-size:16px;margin:0;flex:1}
+nav{display:flex;gap:4px}nav button{background:rgba(255,255,255,.2);color:#fff;border:0;padding:8px 12px;border-radius:8px;font-size:15px}
+nav button.on{background:#fff;color:var(--pri);font-weight:700}
+#dot{width:10px;height:10px;border-radius:50%;background:var(--ng)}#dot.on{background:#69db7c}
+main{padding:12px;max-width:1000px;margin:auto}
+.grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+.card h2{font-size:15px;margin:0 0 8px}
+button{font:inherit;cursor:pointer}
+.tile{border:2px solid var(--line);background:var(--card);color:var(--ink);border-radius:14px;padding:14px 8px;text-align:center;position:relative;min-height:110px}
+.tile:active{transform:scale(.97)}.tile b{display:block;font-size:19px}.tile span{color:var(--mut)}
+.badge{position:absolute;top:6px;right:6px;border-radius:99px;padding:2px 10px;font-size:14px;font-weight:700;background:var(--ok);color:#fff}
+.badge.low{background:var(--warn);color:#000}.badge.zero{background:var(--ng)}
+.btn{border:0;border-radius:10px;padding:12px 14px;background:var(--pri);color:#fff;font-weight:700}
+.btn.sub{background:var(--card);color:var(--ink);border:1px solid var(--line)}.btn.ok{background:var(--ok)}.btn.ng{background:var(--ng)}.btn:disabled{opacity:.4}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.row>.grow{flex:1}
+input[type=number],input[type=text]{font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);width:100%}
+.big{font-size:26px;font-weight:800}.mut{color:var(--mut);font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left}
+td.n,th.n{text-align:right}
+.bar{background:#fff3bf;color:#5c4a00;border:2px solid var(--warn);border-radius:12px;padding:10px;margin-bottom:10px}
+.bar.kitchen{background:#ffe3e3;color:#600;border-color:var(--ng)}
+.stock{display:flex;gap:16px}.stock div{flex:1;text-align:center}
+.pos{color:var(--ok)}.neg{color:var(--ng)}
+.warnmsg{color:var(--ng);font-weight:700;font-size:13px}
+.hide{display:none}
+</style></head><body>
+<header><h1>🥟 EventPOS & Kitchen</h1><span id="dot"></span>
+<nav><button data-v="reg">レジ</button><button data-v="kit">調理場</button><button data-v="adm">管理</button></nav></header>
+<main id="app"></main>
+<script>
+let S=null, view=localStorage.view||'reg', cart={}, pay={recv:'',don:'',name:'',anon:false,note:''}, seenReq=new Set(), first=true;
+const $=s=>document.querySelector(s), yen=n=>'¥'+(n||0).toLocaleString();
+const P=id=>S.products.find(p=>p.id===id);
+const act=(type,a={})=>fetch('/api/action',{method:'POST',body:JSON.stringify({type,...a})});
+const hhmm=t=>new Date(t).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const managed=()=>S.products.filter(p=>p.managed);
+
+function connect(){
+  const es=new EventSource('/api/events');
+  es.onopen=()=>$('#dot').classList.add('on');
+  es.onerror=()=>$('#dot').classList.remove('on');
+  es.onmessage=e=>{S=JSON.parse(e.data);
+    // 新規の補充要請を調理場で通知
+    S.requests.filter(r=>r.status==='requested'&&!seenReq.has(r.id)).forEach(r=>{ if(!first&&view==='kit')beep(); });
+    S.requests.forEach(r=>seenReq.add(r.id)); first=false; render();};
+}
+function beep(){try{const c=new AudioContext(),o=c.createOscillator();o.connect(c.destination);o.frequency.value=880;o.start();o.stop(c.currentTime+.4);navigator.vibrate&&navigator.vibrate(200)}catch{}}
+
+function render(){
+  if(!S)return;
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===view));
+  // 入力中のフォーカスを保つため、レジ画面は部分更新
+  const f=document.activeElement, id=f&&f.id, pos=f&&f.selectionStart;
+  $('#app').innerHTML={reg:regView,kit:kitView,adm:admView}[view]();
+  if(id&&$('#'+id)){const e=$('#'+id);e.focus();try{e.setSelectionRange(pos,pos)}catch{}}
+}
+document.querySelector('nav').onclick=e=>{const v=e.target.dataset.v;if(v){view=localStorage.view=v;render()}};
+
+/* ---------- A. レジ ---------- */
+const cartTotal=()=>Object.entries(cart).reduce((s,[id,q])=>s+P(id).price*q,0);
+function regView(){
+  const total=cartTotal(), recv=+pay.recv||0, change=recv-total, don=+pay.don||0;
+  const waiting=S.requests.filter(r=>r.status==='delivering');
+  const pend=S.requests.filter(r=>r.status==='requested');
+  let h='';
+  waiting.forEach(r=>h+=`<div class="bar row"><div class="grow">🚚 <b>${P(r.product_id).name} ×${r.qty}</b> が調理場から届きます</div><button class="btn ok" onclick="act('receive',{id:'${r.id}'})">OK 受取</button></div>`);
+  h+=`<div class="grid">`+S.products.map(p=>{
+    const st=S.inventory[p.id]?.store??0, q=cart[p.id]||0;
+    const cls=!p.managed?'':st<=0?'zero':st<=5?'low':'';
+    return `<button class="tile" onclick="addCart('${p.id}',1)">
+      ${p.managed?`<span class="badge ${cls}">在庫 ${st}</span>`:`<span class="badge" style="background:#868e96">∞</span>`}
+      <b>${p.name}</b><span>${yen(p.price)}</span>
+      ${q?`<div class="big" style="color:var(--pri)">× ${q}</div>`:''}
+      ${p.managed&&st-q<=0?`<div class="warnmsg">在庫切れ(販売可)</div>`:''}</button>`}).join('')+`</div>`;
+  h+=`<div class="card" style="margin-top:12px"><h2>🧾 現在の注文</h2>`+
+    (Object.keys(cart).length?Object.entries(cart).map(([id,q])=>`<div class="row" style="margin-bottom:6px">
+      <div class="grow">${P(id).name} ${yen(P(id).price)}</div>
+      <button class="btn sub" onclick="addCart('${id}',-1)">−</button><b style="min-width:24px;text-align:center">${q}</b>
+      <button class="btn sub" onclick="addCart('${id}',1)">＋</button></div>`).join(''):'<div class="mut">品目タイルをタップ</div>')+
+    `<div class="big">合計 ${yen(total)}</div>
+    <div class="row" style="margin-top:8px"><div class="grow"><div class="mut">預かり金</div><input id="recv" type="number" inputmode="numeric" value="${pay.recv}" oninput="pay.recv=this.value;soft()"></div>
+    <div class="grow"><div class="mut">お釣り</div><div class="big ${change<0?'neg':''}">${recv?yen(change):'-'}</div></div></div>
+    <div class="row" style="margin-top:6px">${[500,1000,5000,10000].map(v=>`<button class="btn sub" onclick="pay.recv=${v};render()">${yen(v)}</button>`).join('')}
+    <button class="btn sub" onclick="pay.recv=${total};render()">ちょうど</button></div></div>`;
+  h+=`<div class="card"><h2>💝 寄付金（売上に含めません）</h2>
+    <div class="row"><div class="grow"><input id="don" type="number" inputmode="numeric" placeholder="寄付金額" value="${pay.don}" oninput="pay.don=this.value;soft()"></div>
+    <button class="btn sub" ${change>0?'':'disabled'} onclick="pay.don=${Math.max(change,0)};render()">お釣りを寄付 (${yen(Math.max(change,0))})</button></div>
+    <div class="row" style="margin-top:8px"><div class="grow"><input id="dname" type="text" placeholder="寄付者名（任意）" value="${esc(pay.name)}" ${pay.anon?'disabled':''} oninput="pay.name=this.value"></div>
+    <button class="btn ${pay.anon?'':'sub'}" onclick="pay.anon=!pay.anon;render()">匿名</button></div>
+    <input id="dnote" type="text" style="margin-top:8px" placeholder="応援メッセージ・概要" value="${esc(pay.note)}" oninput="pay.note=this.value"></div>`;
+  h+=`<button class="btn" style="width:100%;font-size:20px;padding:16px" ${total||don?'':'disabled'} onclick="checkout()">会計確定 ${yen(total)}${don?` ＋ 寄付 ${yen(don)}`:''}</button>`;
+  h+=`<div class="card" style="margin-top:12px"><h2>📦 補充発注</h2><div class="row">`+
+    managed().map(p=>`<button class="btn sub grow" onclick="act('request',{product_id:'${p.id}',qty:10})">${p.name.replace('小','')} ＋10 発注</button>`).join('')+`</div>`+
+    pend.map(r=>`<div class="mut" style="margin-top:6px">⏳ 依頼中: ${P(r.product_id).name} ×${r.qty}（${hhmm(r.created_at)}）</div>`).join('')+`</div>`;
+  const recent=S.orders.filter(o=>!o.cancelled).slice(-5).reverse();
+  if(recent.length)h+=`<div class="card"><h2>直近の会計</h2>`+recent.map(o=>`<div class="row"><div class="grow mut">${hhmm(o.created_at)} ${o.items.map(i=>i.name+'×'+i.qty).join(', ')} ${yen(o.total_sales)}</div>
+    <button class="btn sub" onclick="if(confirm('取消しますか？(在庫も戻ります)'))act('cancelOrder',{id:'${o.order_id}'})">取消</button></div>`).join('')+`</div>`;
+  return h;
+}
+function soft(){ // 入力中は全再描画せず合計関連のみ更新
+  const f=document.activeElement.id; render();
+}
+function addCart(id,d){cart[id]=Math.max(0,(cart[id]||0)+d);if(!cart[id])delete cart[id];render()}
+async function checkout(){
+  const items=Object.entries(cart).map(([id,qty])=>({id,qty})), don=+pay.don||0;
+  await act('sale',{items,cashReceived:+pay.recv||null,donation:don>0?{amount:don,name:pay.name,anon:pay.anon,note:pay.note}:null});
+  cart={};pay={recv:'',don:'',name:'',anon:false,note:''};render();
+}
+
+/* ---------- B. 調理場 ---------- */
+function kitView(){
+  const pend=S.requests.filter(r=>r.status==='requested'), tr=S.requests.filter(r=>r.status==='delivering');
+  let h='';
+  pend.forEach(r=>h+=`<div class="bar kitchen row"><div class="grow">🔔 <b>補充要請: ${P(r.product_id).name} ×${r.qty}</b><div class="mut">${hhmm(r.created_at)}</div></div>
+    <button class="btn" onclick="act('deliver',{id:'${r.id}'})">持っていきます</button></div>`);
+  tr.forEach(r=>h+=`<div class="mut">🚚 配達中: ${P(r.product_id).name} ×${r.qty}</div>`);
+  h+=`<div class="grid" style="margin-top:10px">`+managed().map(p=>{const i=S.inventory[p.id]||{store:0,kitchen:0,transit:0};
+    return `<div class="card"><h2>${p.name}</h2>
+    <div class="stock"><div><div class="mut">店先</div><div class="big ${i.store<=0?'neg':''}">${i.store}</div></div>
+    <div><div class="mut">厨房</div><div class="big ${i.kitchen<0?'neg':''}">${i.kitchen}</div></div>
+    <div><div class="mut">配達中</div><div class="big">${i.transit}</div></div></div>
+    <div class="row" style="margin-top:8px"><button class="btn grow" onclick="act('addKitchen',{product_id:'${p.id}',qty:10})">＋10</button>
+    <button class="btn grow" onclick="act('addKitchen',{product_id:'${p.id}',qty:20})">＋20</button>
+    <button class="btn sub" onclick="act('addKitchen',{product_id:'${p.id}',qty:-1})">−1</button></div></div>`}).join('')+`</div>`;
+  return h;
+}
+
+/* ---------- 管理 ---------- */
+function calc(){
+  const ok=S.orders.filter(o=>!o.cancelled), sum={};
+  S.products.forEach(p=>sum[p.id]={name:p.name,qty:0,amt:0});
+  ok.forEach(o=>o.items.forEach(l=>{(sum[l.product_id]||={name:l.name,qty:0,amt:0});sum[l.product_id].qty+=l.qty;sum[l.product_id].amt+=l.unit_price*l.qty}));
+  const sales=Object.values(sum).reduce((s,x)=>s+x.amt,0), don=S.donations.reduce((s,d)=>s+d.amount,0);
+  const theory=S.register.opening+sales+don, cl=S.register.closing;
+  return {sum,sales,don,theory,diff:cl==null?null:cl-theory};
+}
+function admView(){
+  const c=calc(), r=S.register;
+  let h=`<div class="grid"><div class="card"><div class="mut">商品総売上</div><div class="big">${yen(c.sales)}</div></div>
+  <div class="card"><div class="mut">寄付金総額</div><div class="big">${yen(c.don)}</div></div>
+  <div class="card"><div class="mut">理論手元現金</div><div class="big">${yen(c.theory)}</div></div></div>`;
+  h+=`<div class="card"><h2>商品別売上</h2><table><tr><th>品目</th><th class="n">数量</th><th class="n">小計</th></tr>`+
+    Object.values(c.sum).map(x=>`<tr><td>${x.name}</td><td class="n">${x.qty}</td><td class="n">${yen(x.amt)}</td></tr>`).join('')+
+    `<tr><th>合計</th><th class="n">${Object.values(c.sum).reduce((s,x)=>s+x.qty,0)}</th><th class="n">${yen(c.sales)}</th></tr></table></div>`;
+  h+=`<div class="card"><h2>🧮 レジ点検・精算</h2>
+    <div class="mut">開始時釣銭準備金</div><input id="open" type="number" inputmode="numeric" value="${r.opening}" onchange="act('setOpening',{amount:this.value})">
+    <div class="mut" style="margin-top:8px">終了時 実査手元現金</div><input id="close" type="number" inputmode="numeric" value="${r.closing??''}" placeholder="実際に数えた金額">
+    <div class="row" style="margin-top:8px"><button class="btn grow" onclick="act('closeRegister',{closing:$('#close').value||0})">精算する</button>
+    ${r.closedAt?`<button class="btn sub" onclick="act('reopenRegister')">再開</button>`:''}</div>
+    <div class="mut" style="margin-top:8px">理論手元現金 = 準備金 ${yen(r.opening)} ＋ 売上 ${yen(c.sales)} ＋ 寄付 ${yen(c.don)} = <b>${yen(c.theory)}</b></div>
+    ${c.diff!=null?`<div class="big ${c.diff===0?'pos':'neg'}">${c.diff===0?'✅ 過不足なし':c.diff<0?`⚠ 不足 ${yen(-c.diff)}`:`⚠ 過剰 ${yen(c.diff)}`}</div>`:''}</div>`;
+  h+=`<div class="card"><h2>💝 寄付金一覧（${yen(c.don)}）</h2>`+(S.donations.length?`<table><tr><th>時刻</th><th>名前</th><th class="n">金額</th><th>メッセージ</th><th></th></tr>`+
+    S.donations.slice().reverse().map(d=>`<tr><td>${hhmm(d.timestamp)}</td><td>${esc(d.donor_name)}</td><td class="n">${yen(d.amount)}</td><td>${esc(d.note)}</td>
+    <td><button class="btn sub" style="padding:2px 8px" onclick="if(confirm('削除しますか？'))act('cancelDonation',{id:'${d.donation_id}'})">×</button></td></tr>`).join('')+`</table>`:'<div class="mut">まだありません</div>')+`</div>`;
+  h+=`<div class="card"><h2>⚙ 価格・在庫設定</h2>`+S.products.map(p=>`<div class="row" style="margin-bottom:8px"><div class="grow">${p.name}</div>
+    <input type="number" inputmode="numeric" style="width:100px" value="${p.price}" onchange="act('setPrice',{id:'${p.id}',price:this.value})">円
+    ${p.managed?`<span class="mut">店先在庫</span><input type="number" style="width:80px" value="${S.inventory[p.id].store}" onchange="act('adjustStore',{product_id:'${p.id}',qty:this.value})">`:''}</div>`).join('')+
+    `<div class="mut">※価格変更は以降の会計のみに反映。過去の注文は購入時単価のまま。</div></div>`;
+  h+=`<div class="row"><button class="btn" onclick="csv()">日計レポート CSV出力</button>
+    <button class="btn ng" onclick="if(confirm('全データを消去します。よろしいですか？')&&confirm('本当に消去しますか？'))act('reset')">全データ初期化</button></div>`;
+  return h;
+}
+function csv(){
+  const c=calc(), L=[['日計レポート',new Date().toLocaleString('ja-JP')],[],['品目','数量','小計']];
+  Object.values(c.sum).forEach(x=>L.push([x.name,x.qty,x.amt]));
+  L.push(['商品総売上',,c.sales],['寄付金総額',,c.don],['開始時準備金',,S.register.opening],['理論手元現金',,c.theory],
+    ['実査手元現金',,S.register.closing??''],['過不足',,c.diff??''],[],['注文ID','時刻','明細','合計','状態']);
+  S.orders.forEach(o=>L.push([o.order_id,new Date(o.created_at).toLocaleString('ja-JP'),o.items.map(i=>`${i.name}×${i.qty}@${i.unit_price}`).join(' / '),o.total_sales,o.cancelled?'取消':'有効']));
+  L.push([],['寄付ID','時刻','名前','金額','メッセージ']);
+  S.donations.forEach(d=>L.push([d.donation_id,new Date(d.timestamp).toLocaleString('ja-JP'),d.donor_name,d.amount,d.note]));
+  const t=L.map(r=>r.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿'+t],{type:'text/csv'}));
+  a.download='daily_report.csv';a.click();
+}
+connect();
+</script></body></html>
