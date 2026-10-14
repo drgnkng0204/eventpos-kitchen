@@ -1,0 +1,2 @@
+{ "name": "EventPOS & Kitchen", "short_name": "EventPOS", "start_url": "./", "display": "standalone",
+  "background_color": "#f4f1ea", "theme_color": "#d9480f", "icons": [] }

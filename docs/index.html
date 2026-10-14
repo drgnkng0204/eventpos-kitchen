@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
+<link rel="manifest" href="manifest.json">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>EventPOS & Kitchen</title>
 <style>
@@ -34,12 +35,12 @@ td.n,th.n{text-align:right}
 .warnmsg{color:var(--ng);font-weight:700;font-size:13px}
 .hide{display:none}
 </style></head><body>
-<header><h1>🥟 EventPOS & Kitchen</h1><span id="dot"></span>
+<header><h1>🥟 EventPOS & Kitchen</h1><button id="bell" onclick="cycleNotify()" style="background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:6px 10px"></button><span id="dot"></span>
 <nav><button data-v="reg">レジ</button><button data-v="kit">調理場</button><button data-v="adm">管理</button></nav></header>
 <main id="app"></main>
 <script type="module" src="store.js"></script>
 <script>
-let S=null, view=localStorage.view||'reg', cart={}, pay={recv:'',don:'',name:'',anon:false,note:''}, seenReq=new Set(), first=true;
+let S=null, lastStatus={}, notifyRole=localStorage.notifyRole||'off', swReg=null, view=localStorage.view||'reg', cart={}, pay={recv:'',don:'',name:'',anon:false,note:''}, seenReq=new Set(), first=true;
 const $=s=>document.querySelector(s), yen=n=>'¥'+(n||0).toLocaleString();
 const P=id=>S.products.find(p=>p.id===id);
 const act=(type,a={})=>window.fbAct(type,a).catch(e=>alert('通信エラー: '+e.message));
@@ -49,12 +50,36 @@ const managed=()=>S.products.filter(p=>p.managed);
 
 function connect(){
   const go=()=>window.fbWatch(st=>{S=st;
-    S.requests.filter(r=>r.status==='requested'&&!seenReq.has(r.id)).forEach(r=>{ if(!first&&view==='kit')beep(); });
-    S.requests.forEach(r=>seenReq.add(r.id)); first=false; render();},
+    S.requests.forEach(r=>{
+      const prev=lastStatus[r.id];
+      if(!first){
+        if(r.status==='requested'&&prev===undefined&&notifyRole==='kit')notify('🔔 補充要請',`${P(r.product_id).name} ×${r.qty} を届けてください`);
+        if(r.status==='delivering'&&prev!=='delivering'&&notifyRole==='reg')notify('🚚 商品が届きます',`${P(r.product_id).name} ×${r.qty}（受取OKを押してください）`);
+      }
+      lastStatus[r.id]=r.status;});
+    first=false; render();},
     s=>{ $('#dot').classList.toggle('on',s==='online');
       if(s==='config')$('#app').innerHTML='<div class="card"><h2>Firebase 未設定</h2>docs/firebase-config.js に firebaseConfig を設定してください。</div>'; });
   window.fbWatch?go():window.addEventListener('fb-ready',go);
 }
+const ROLE_LABEL={off:'🔕 通知OFF',kit:'🔔 厨房通知',reg:'🔔 レジ通知'};
+function updBell(){const b=$('#bell');if(b)b.textContent=ROLE_LABEL[notifyRole]}
+async function cycleNotify(){
+  const next={off:'kit',kit:'reg',reg:'off'}[notifyRole];
+  if(next!=='off'&&'Notification' in window&&Notification.permission!=='granted'){
+    const p=await Notification.requestPermission();
+    if(p!=='granted'){alert('ブラウザの通知が許可されていません。設定で許可してください。');return}
+  }
+  notifyRole=localStorage.notifyRole=next;updBell();
+}
+function notify(title,body){
+  beep();
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  const o={body,tag:'eventpos',renotify:true,vibrate:[200,100,200]};
+  if(swReg)swReg.showNotification(title,o);else new Notification(title,o);
+}
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').then(r=>swReg=r).catch(()=>{});
+updBell();
 function beep(){try{const c=new AudioContext(),o=c.createOscillator();o.connect(c.destination);o.frequency.value=880;o.start();o.stop(c.currentTime+.4);navigator.vibrate&&navigator.vibrate(200)}catch{}}
 
 function render(){
