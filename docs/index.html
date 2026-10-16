@@ -35,10 +35,10 @@ td.n,th.n{text-align:right}
 .warnmsg{color:var(--ng);font-weight:700;font-size:13px}
 .hide{display:none}
 </style></head><body>
-<header><h1>🥟 EventPOS & Kitchen <small style="font-weight:400;opacity:.8">v1.4</small></h1><button id="bell" onclick="cycleNotify()" style="background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:6px 10px"></button><span id="dot"></span>
+<header><h1>🥟 EventPOS & Kitchen <small style="font-weight:400;opacity:.8">v1.5</small></h1><button id="bell" onclick="cycleNotify()" style="background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:6px 10px"></button><span id="dot"></span>
 <nav><button data-v="reg">レジ</button><button data-v="kit">調理場</button><button data-v="adm">管理</button></nav></header>
 <main id="app"></main>
-<script type="module" src="store.js?v=14"></script>
+<script type="module" src="store.js?v=15"></script>
 <script>
 let S=null, tix={}, lastStatus={}, notifyRole=localStorage.notifyRole||'off', swReg=null, view=localStorage.view||'reg', cart={}, pay={recv:'',don:'',name:'',anon:false,note:''}, seenReq=new Set(), first=true;
 const $=s=>document.querySelector(s), yen=n=>'¥'+(n||0).toLocaleString();
@@ -46,6 +46,7 @@ const P=id=>S.products.find(p=>p.id===id);
 const act=(type,a={})=>window.fbAct(type,a).catch(e=>alert('通信エラー: '+e.message));
 const hhmm=t=>new Date(t).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const unit=p=>p.unit??(p.id==='niku'?6:10), unitLabel=p=>p.id==='niku'?'（1袋）':'';
 const managed=()=>S.products.filter(p=>p.managed);
 
 function connect(){
@@ -134,7 +135,7 @@ function regView(){
     <input id="dnote" type="text" style="margin-top:8px" placeholder="応援メッセージ・概要" value="${esc(pay.note)}" oninput="pay.note=this.value"></div>`;
   h+=`<button class="btn" style="width:100%;font-size:20px;padding:16px" ${total||don?'':'disabled'} onclick="checkout()">会計確定 ${yen(due)}${tAmt?`（券${tCnt}枚）`:''}${don?` ＋ 寄付 ${yen(don)}`:''}</button>`;
   h+=`<div class="card" style="margin-top:12px"><h2>📦 補充発注</h2><div class="row">`+
-    managed().map(p=>`<button class="btn sub grow" onclick="act('request',{product_id:'${p.id}',qty:10})">${p.name.replace('小','')} ＋10 発注</button>`).join('')+`</div>`+
+    managed().map(p=>`<button class="btn sub grow" onclick="act('request',{product_id:'${p.id}',qty:${unit(p)}})">${p.name.replace('小','')} ＋${unit(p)}${unitLabel(p)} 発注</button>`).join('')+`</div>`+
     pend.map(r=>`<div class="mut" style="margin-top:6px">⏳ 依頼中: ${P(r.product_id).name} ×${r.qty}（${hhmm(r.created_at)}）</div>`).join('')+`</div>`;
   const recent=S.orders.filter(o=>!o.cancelled).slice(-5).reverse();
   if(recent.length)h+=`<div class="card"><h2>直近の会計</h2>`+recent.map(o=>`<div class="row"><div class="grow mut">${hhmm(o.created_at)} ${o.items.map(i=>i.name+'×'+i.qty).join(', ')} ${yen(o.total_sales)}</div>
@@ -165,8 +166,8 @@ function kitView(){
     <div class="stock"><div><div class="mut">店先</div><div class="big ${i.store<=0?'neg':''}">${i.store}</div></div>
     <div><div class="mut">厨房</div><div class="big ${i.kitchen<0?'neg':''}">${i.kitchen}</div></div>
     <div><div class="mut">配達中</div><div class="big">${i.transit}</div></div></div>
-    <div class="row" style="margin-top:8px"><button class="btn grow" onclick="act('addKitchen',{product_id:'${p.id}',qty:10})">＋10</button>
-    <button class="btn grow" onclick="act('addKitchen',{product_id:'${p.id}',qty:20})">＋20</button>
+    <div class="row" style="margin-top:8px"><button class="btn grow" onclick="act('addKitchen',{product_id:'${p.id}',qty:${unit(p)}})">＋${unit(p)}${unitLabel(p)}</button>
+    <button class="btn grow" onclick="act('addKitchen',{product_id:'${p.id}',qty:${unit(p)*2}})">＋${unit(p)*2}</button>
     <button class="btn sub" onclick="act('addKitchen',{product_id:'${p.id}',qty:-1})">−1</button></div></div>`}).join('')+`</div>`;
   return h;
 }
